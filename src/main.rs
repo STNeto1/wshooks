@@ -3,7 +3,7 @@ use std::{net::SocketAddr, sync::Arc};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Path, State,
     },
     http::StatusCode,
     response::IntoResponse,
@@ -37,6 +37,7 @@ async fn main() {
     // build our application with some routes
     let app = Router::new()
         .route("/", get(index))
+        .route("/:key", get(key_handler))
         .route("/ws", get(ws_handler))
         // logging so we can see whats going on
         // .layer(
@@ -54,17 +55,24 @@ async fn main() {
         .unwrap();
 }
 
-async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn index() -> impl IntoResponse {
+    return (StatusCode::OK, String::from("index route"));
+}
+
+async fn key_handler(
+    Path(key): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
     match state.tx.send(WSData {
-        key: String::from("some key"),
-        data: String::from("some data"),
+        key,
+        data: String::from("data"),
     }) {
         Ok(_) => {
-            println!("success sending message => {}", state.rx.len());
+            println!("success sending message");
         }
         Err(err) => println!("error sending message => {}", err),
     }
-    return (StatusCode::OK, String::from("asdasd"));
+    return (StatusCode::OK, String::from("key route"));
 }
 
 /// The handler for the HTTP request (this gets called when the HTTP GET lands at the start
