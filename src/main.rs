@@ -1,45 +1,53 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        TypedHeader,
+        State, TypedHeader,
     },
+    http::StatusCode,
     response::IntoResponse,
     routing::get,
-    Router,
+    Extension, Router,
 };
+use futures::{SinkExt, StreamExt};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 
-use std::borrow::Cow;
-use std::net::SocketAddr;
-use std::ops::ControlFlow;
+use std::{net::SocketAddr, sync::Arc};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
-use axum::extract::ws::CloseFrame;
 
-//allows to split the websocket stream into separate TX and RX branches
-use futures::{sink::SinkExt, stream::StreamExt};
+struct AppState {
+    tx: Sender<String>,
+    rx: Receiver<String>,
+}
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "example_websockets=debug,tower_http=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    // tracing_subscriber::registry()
+    //     .with(
+    //         tracing_subscriber::EnvFilter::try_from_default_env()
+    //             .unwrap_or_else(|_| "example_websockets=debug,tower_http=debug".into()),
+    //     )
+    //     .with(tracing_subscriber::fmt::layer())
+    //     .init();
+
+    let (tx, rx) = broadcast::channel::<String>(100);
+
+    let app_state = Arc::new(AppState { tx, rx });
 
     // build our application with some routes
     let app = Router::new()
+        .route("/", get(index))
         .route("/ws", get(ws_handler))
         // logging so we can see whats going on
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(DefaultMakeSpan::default().include_headers(true)),
-        );
+        // .layer(
+        //     TraceLayer::new_for_http()
+        //         .make_span_with(DefaultMakeSpan::default().include_headers(true)),
+        // )
+        .with_state(app_state);
 
     // run it with hyper
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -50,6 +58,16 @@ async fn main() {
         .unwrap();
 }
 
+async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.tx.send(String::from("Index fn")) {
+        Ok(_) => {
+            println!("success sending message => {}", state.rx.len());
+        }
+        Err(err) => println!("error sending message => {}", err),
+    }
+    return (StatusCode::OK, String::from("asdasd"));
+}
+
 /// The handler for the HTTP request (this gets called when the HTTP GET lands at the start
 /// of websocket negotiation). After this completes, the actual switching from HTTP to
 /// websocket protocol will occur.
@@ -57,50 +75,45 @@ async fn main() {
 /// as well as things from HTTP headers such as user-agent of the browser etc.
 async fn ws_handler(
     ws: WebSocketUpgrade,
-    user_agent: Option<TypedHeader<headers::UserAgent>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let user_agent = if let Some(TypedHeader(user_agent)) = user_agent {
-        user_agent.to_string()
-    } else {
-        String::from("Unknown browser")
-    };
-    println!("`{}` at {} connected.", user_agent, addr.to_string());
     // finalize the upgrade process by returning upgrade callback.
     // we can customize the callback by sending additional info such as address.
-    ws.on_upgrade(move |socket| handle_socket(socket, addr))
+    ws.on_upgrade(move |socket| handle_socket(socket, addr, state))
 }
 
 /// Actual websocket statemachine (one will be spawned per connection)
-async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
+async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>) {
+    let (mut sender, mut receiver) = socket.split();
     //send a ping (unsupported by some browsers) just to kick things off and get a response
-    if let Ok(_) = socket.send(Message::Ping("Ping".into())).await {
-        println!("Pinged {}...", who);
-    } else {
-        println!("Could not send ping {}!", who);
-        // no Error here since the only thing we can do is to close the connection.
-        // If we can not send messages, there is no way to salvage the statemachine anyway.
-        return;
-    }
+    // if let Ok(_) = se.send(Message::Ping("Ping".into())).await {
+    //     println!("Pinged {}...", who);
+    // } else {
+    //     println!("Could not send ping {}!", who);
+    //     // no Error here since the only thing we can do is to close the connection.
+    //     // If we can not send messages, there is no way to salvage the statemachine anyway.
+    //     return;
+    // }
 
     // receive single message from a client (we can either receive or send with socket).
     // this will likely be the Pong for our Ping or a hello message from client.
     // waiting for message from a client will block this task, but will not block other client's
     // connections.
-    if let Some(msg) = socket.recv().await {
-        if let Ok(msg) = msg {
-            let ping_result = process_message(msg, who);
-            if ping_result.should_stop() {
-                return;
-            }
-        } else {
-            println!("client {} abruptly disconnected", who);
-            return;
-        }
-    }
+    // if let Some(msg) = socket.recv().await {
+    //     if let Ok(msg) = msg {
+    //         let ping_result = process_message(msg, who);
+    //         if ping_result.should_stop() {
+    //             return;
+    //         }
+    //     } else {
+    //         println!("client {} abruptly disconnected", who);
+    //         return;
+    //     }
+    // }
 
-    let mut _ref = "".to_owned();
-    if let Some(msg) = socket.recv().await {
+    let mut _ref = String::new();
+    if let Some(msg) = receiver.next().await {
         if let Ok(msg) = msg {
             let client_ref = process_message(msg, who);
             match client_ref.get_data() {
@@ -113,27 +126,27 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
         }
     }
 
-    println!("client ref: {}", _ref);
+    println!("client ref => {}", _ref);
 
-    // Since each client gets individual statemachine, we can pause handling
-    // when necessary to wait for some external event (in this case illustrated by sleeping).
-    // Waiting for this client to finish getting its greetings does not prevent other clients from
-    // connecting to server and receiving their greetings.
-    /*
-    for i in 1..5 {
-        if socket
-            .send(Message::Text(String::from(format!("Hi {} times!", i))))
-            .await
-            .is_err()
-        {
-            println!("client {} abruptly disconnected", who);
-            return;
+    let mut rx = state.rx.resubscribe();
+    let send_task = tokio::spawn(async move {
+        while let Ok(msg) = rx.recv().await {
+            if sender.send(Message::Text(msg)).await.is_err() {
+                break;
+            }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }*/
+    });
+
+    let _ = send_task.await;
 
     // returning from the handler closes the websocket connection
     println!("Websocket context {} destroyed", who);
+}
+
+#[derive(Clone)]
+struct WSData {
+    key: usize,
+    data: usize,
 }
 
 #[derive(PartialEq)]
