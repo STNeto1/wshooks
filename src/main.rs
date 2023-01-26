@@ -1,23 +1,21 @@
+use std::{net::SocketAddr, sync::Arc};
+
 use axum::{
+    Extension,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
-        State, TypedHeader,
+        State,
+        TypedHeader, ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
-    Extension, Router,
+    Router, routing::get,
 };
-use futures::{SinkExt, StreamExt};
-use tokio::sync::broadcast::{self, Receiver, Sender};
-
-use std::{net::SocketAddr, sync::Arc};
-use tower_http::trace::{DefaultMakeSpan, TraceLayer};
-
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
+use futures::{SinkExt, StreamExt};
+use tokio::sync::broadcast::{self, Receiver, Sender};
+use tower_http::trace::{DefaultMakeSpan, TraceLayer};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 struct AppState {
     tx: Sender<String>,
@@ -87,35 +85,36 @@ async fn ws_handler(
 async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
     //send a ping (unsupported by some browsers) just to kick things off and get a response
-    // if let Ok(_) = se.send(Message::Ping("Ping".into())).await {
-    //     println!("Pinged {}...", who);
-    // } else {
-    //     println!("Could not send ping {}!", who);
-    //     // no Error here since the only thing we can do is to close the connection.
-    //     // If we can not send messages, there is no way to salvage the statemachine anyway.
-    //     return;
-    // }
+    if let Ok(_) = se.send(Message::Ping("Ping".into())).await {
+        println!("Pinged {}...", who);
+    } else {
+        println!("Could not send ping {}!", who);
+        // no Error here since the only thing we can do is to close the connection.
+        // If we can not send messages, there is no way to salvage the statemachine anyway.
+        return;
+    }
 
     // receive single message from a client (we can either receive or send with socket).
     // this will likely be the Pong for our Ping or a hello message from client.
     // waiting for message from a client will block this task, but will not block other client's
     // connections.
-    // if let Some(msg) = socket.recv().await {
-    //     if let Ok(msg) = msg {
-    //         let ping_result = process_message(msg, who);
-    //         if ping_result.should_stop() {
-    //             return;
-    //         }
-    //     } else {
-    //         println!("client {} abruptly disconnected", who);
-    //         return;
-    //     }
-    // }
+    if let Some(msg) = receiver.recv().await {
+        if let Ok(msg) = msg {
+            let ping_result = process_message(msg, who);
+            if ping_result.should_stop() {
+                return;
+            }
+        } else {
+            println!("client {} abruptly disconnected", who);
+            return;
+        }
+    }
 
     let mut _ref = String::new();
     if let Some(msg) = receiver.next().await {
         if let Ok(msg) = msg {
             let client_ref = process_message(msg, who);
+            // if is not a string with the client ref, just kill
             match client_ref.get_data() {
                 Some(d) => _ref = d,
                 _ => return,
@@ -129,7 +128,7 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
     println!("client ref => {}", _ref);
 
     let mut rx = state.rx.resubscribe();
-    let send_task = tokio::spawn(async move {
+    let send_message_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
             if sender.send(Message::Text(msg)).await.is_err() {
                 break;
@@ -137,7 +136,8 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
         }
     });
 
-    let _ = send_task.await;
+    // keep the task of sending messages back to client
+    let _ = send_message_task.await;
 
     // returning from the handler closes the websocket connection
     println!("Websocket context {} destroyed", who);
@@ -162,18 +162,18 @@ impl MessagePayload {
     }
 
     fn get_data(&self) -> Option<String> {
-        match self {
-            MessagePayload::Data(data) => return Some(data.to_owned()),
-            _ => return None,
-        }
+        return match self {
+            MessagePayload::Data(data) => Some(data.to_owned()),
+            _ => None,
+        };
     }
 }
 
 /// helper to print contents of messages to stdout. Has special treatment for Close.
 fn process_message(msg: Message, who: SocketAddr) -> MessagePayload {
-    match msg {
-        Message::Text(t) => return MessagePayload::Data(t),
-        Message::Binary(_) => return MessagePayload::End,
+    return match msg {
+        Message::Text(t) => MessagePayload::Data(t),
+        Message::Binary(_) => MessagePayload::End,
         Message::Close(c) => {
             if let Some(cf) = c {
                 println!(
@@ -183,13 +183,9 @@ fn process_message(msg: Message, who: SocketAddr) -> MessagePayload {
             } else {
                 println!(">>> {} somehow sent close message without CloseFrame", who);
             }
-            return MessagePayload::End;
+            MessagePayload::End
         }
-
-        Message::Pong(_) => return MessagePayload::Ignore,
-        // You should never need to manually handle Message::Ping, as axum's websocket library
-        // will do so for you automagically by replying with Pong and copying the v according to
-        // spec. But if you need the contents of the pings you can see them here.
-        Message::Ping(_) => return MessagePayload::Ignore,
-    }
+        Message::Pong(_) => MessagePayload::Ignore,
+        Message::Ping(_) => MessagePayload::Ignore,
+    };
 }
