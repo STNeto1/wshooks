@@ -1,25 +1,23 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    Extension,
     extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
         State,
-        TypedHeader, ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::IntoResponse,
-    Router, routing::get,
+    routing::get,
+    Router,
 };
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::broadcast::{self, Receiver, Sender};
-use tower_http::trace::{DefaultMakeSpan, TraceLayer};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 struct AppState {
-    tx: Sender<String>,
-    rx: Receiver<String>,
+    tx: Sender<WSData>,
+    rx: Receiver<WSData>,
 }
 
 #[tokio::main]
@@ -32,7 +30,7 @@ async fn main() {
     //     .with(tracing_subscriber::fmt::layer())
     //     .init();
 
-    let (tx, rx) = broadcast::channel::<String>(100);
+    let (tx, rx) = broadcast::channel::<WSData>(100);
 
     let app_state = Arc::new(AppState { tx, rx });
 
@@ -57,7 +55,10 @@ async fn main() {
 }
 
 async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state.tx.send(String::from("Index fn")) {
+    match state.tx.send(WSData {
+        key: String::from("some key"),
+        data: String::from("some data"),
+    }) {
         Ok(_) => {
             println!("success sending message => {}", state.rx.len());
         }
@@ -85,7 +86,7 @@ async fn ws_handler(
 async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
     //send a ping (unsupported by some browsers) just to kick things off and get a response
-    if let Ok(_) = se.send(Message::Ping("Ping".into())).await {
+    if let Ok(_) = sender.send(Message::Ping("Ping".into())).await {
         println!("Pinged {}...", who);
     } else {
         println!("Could not send ping {}!", who);
@@ -98,7 +99,7 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
     // this will likely be the Pong for our Ping or a hello message from client.
     // waiting for message from a client will block this task, but will not block other client's
     // connections.
-    if let Some(msg) = receiver.recv().await {
+    if let Some(msg) = receiver.next().await {
         if let Ok(msg) = msg {
             let ping_result = process_message(msg, who);
             if ping_result.should_stop() {
@@ -130,7 +131,19 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
     let mut rx = state.rx.resubscribe();
     let send_message_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
-            if sender.send(Message::Text(msg)).await.is_err() {
+            // client should ignore message not sent to his ref
+            if msg.key != _ref {
+                continue;
+            }
+
+            if sender
+                .send(Message::Text(format!(
+                    "key => {}, value => {}",
+                    msg.key, msg.data
+                )))
+                .await
+                .is_err()
+            {
                 break;
             }
         }
@@ -145,8 +158,8 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
 
 #[derive(Clone)]
 struct WSData {
-    key: usize,
-    data: usize,
+    key: String,
+    data: String,
 }
 
 #[derive(PartialEq)]
