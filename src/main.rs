@@ -1,3 +1,4 @@
+extern crate dotenv;
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
@@ -12,8 +13,12 @@ use axum::{
 };
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
+use dotenv::dotenv;
 use futures::{SinkExt, StreamExt};
+use prisma::PrismaClient;
 use tokio::sync::broadcast::{self, Receiver, Sender};
+
+mod prisma;
 
 struct AppState {
     tx: Sender<WSData>,
@@ -22,14 +27,12 @@ struct AppState {
 
 #[tokio::main]
 async fn main() {
-    // tracing_subscriber::registry()
-    //     .with(
-    //         tracing_subscriber::EnvFilter::try_from_default_env()
-    //             .unwrap_or_else(|_| "example_websockets=debug,tower_http=debug".into()),
-    //     )
-    //     .with(tracing_subscriber::fmt::layer())
-    //     .init();
+    dotenv().expect("failed to load env");
 
+    let _client = PrismaClient::_builder()
+        .build()
+        .await
+        .expect("failed to create prisma");
     let (tx, rx) = broadcast::channel::<WSData>(100);
 
     let app_state = Arc::new(AppState { tx, rx });
@@ -39,16 +42,10 @@ async fn main() {
         .route("/", get(index))
         .route("/:key", get(key_handler))
         .route("/ws", get(ws_handler))
-        // logging so we can see whats going on
-        // .layer(
-        //     TraceLayer::new_for_http()
-        //         .make_span_with(DefaultMakeSpan::default().include_headers(true)),
-        // )
         .with_state(app_state);
 
     // run it with hyper
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await
