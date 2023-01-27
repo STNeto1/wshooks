@@ -164,14 +164,11 @@ pub mod http {
             .user()
             .find_first(vec![user::email::equals(payload.email.to_owned())])
             .exec()
-            .await;
+            .await
+            .map_err(|_| CoreError::InternalServerError(None))?;
         match existing_user {
-            Ok(value) => {
-                if value.is_some() {
-                    return Err(CoreError::BadRequest(Some("Email already in use".to_owned())));
-                }
-            }
-            Err(_) => return Err(CoreError::InternalServerError(None)),
+            Some(_) => return Err(CoreError::BadRequest(Some("Email already in use".to_owned()))),
+            None => ()
         }
 
         let salt = b"some salt";
@@ -206,11 +203,34 @@ pub mod http {
         return Ok(Json(AuthBody::new(token.unwrap())));
     }
 
+    #[derive(Debug, Serialize)]
+    pub struct Profile {
+        id: String,
+        name: String,
+        email: String,
+    }
+
     pub async fn profile(
-        State(_state): State<Arc<AppState>>,
+        State(state): State<Arc<AppState>>,
         claims: Claims,
-    ) -> Result<String, CoreError> {
-        dbg!(claims);
-        return Err(CoreError::Unauthorized(Some(String::from("dbg!"))));
+    ) -> Result<Json<Profile>, CoreError> {
+        let subject = state
+            .client
+            .user()
+            .find_first(vec![user::id::equals(claims.sub)])
+            .exec()
+            .await
+            .map_err(|_| CoreError::InternalServerError(None))?;
+        if subject.is_none() {
+            return Err(CoreError::Unauthorized(None));
+        }
+
+        let unwrapped_user = subject.unwrap();
+
+        return Ok(Json(Profile {
+            id: unwrapped_user.id,
+            name: unwrapped_user.name,
+            email: unwrapped_user.email,
+        }));
     }
 }
