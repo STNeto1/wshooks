@@ -1,7 +1,7 @@
 use axum::{
     http::StatusCode,
-    response::{IntoResponse, Response},
     Json,
+    response::{IntoResponse, Response},
 };
 use serde::Serialize;
 use serde_json::json;
@@ -11,6 +11,7 @@ pub enum CoreError {
     BadRequest(Option<String>),
     BadValidation(ValidationErrors),
     Unauthorized(Option<String>),
+    InternalServerError(Option<String>),
 }
 
 #[derive(Serialize)]
@@ -37,6 +38,7 @@ impl IntoResponse for CoreError {
                 message.unwrap_or(String::from("Unauthorized")),
                 None,
             ),
+            CoreError::InternalServerError(message) => (StatusCode::INTERNAL_SERVER_ERROR, message.unwrap_or(String::from("Internal Server Error")), None)
         };
 
         let body = Json(json!({

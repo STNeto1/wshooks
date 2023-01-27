@@ -1,4 +1,6 @@
 extern crate dotenv;
+extern crate argon2;
+
 use std::{net::SocketAddr, sync::Arc};
 
 use auth::http;
@@ -26,19 +28,20 @@ mod prisma;
 pub struct AppState {
     tx: Sender<WSData>,
     rx: Receiver<WSData>,
+    client: PrismaClient,
 }
 
 #[tokio::main]
 async fn main() {
     dotenv().expect("failed to load env");
 
-    let _client = PrismaClient::_builder()
+    let client = PrismaClient::_builder()
         .build()
         .await
         .expect("failed to create prisma");
     let (tx, rx) = broadcast::channel::<WSData>(100);
 
-    let app_state = Arc::new(AppState { tx, rx });
+    let app_state = Arc::new(AppState { tx, rx, client });
 
     // build our application with some routes
     let app = Router::new()
@@ -46,6 +49,7 @@ async fn main() {
         .route("/:key", get(key_handler))
         .route("/ws", get(ws_handler))
         .route("/auth/login", post(http::login))
+        .route("/auth/register", post(http::register))
         .route("/auth/profile", get(http::profile))
         .with_state(app_state);
 
