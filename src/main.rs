@@ -1,25 +1,29 @@
-extern crate dotenv;
 extern crate argon2;
+extern crate dotenv;
 
 use std::{net::SocketAddr, sync::Arc};
 
-use auth::http;
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
-        Path, State,
+        Path,
+        State, ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
     Router,
+    routing::{get, post},
 };
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
 use dotenv::dotenv;
 use futures::{SinkExt, StreamExt};
-use prisma::PrismaClient;
 use tokio::sync::broadcast::{self, Receiver, Sender};
+use tower_http::trace::TraceLayer;
+use tracing::{info};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use auth::http;
+use prisma::PrismaClient;
 
 mod auth;
 mod errors;
@@ -33,6 +37,14 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "example_tracing_aka_logging=debug,tower_http=debug".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     dotenv().expect("failed to load env");
 
     let client = PrismaClient::_builder()
@@ -51,11 +63,12 @@ async fn main() {
         .route("/auth/login", post(http::login))
         .route("/auth/register", post(http::register))
         .route("/auth/profile", get(http::profile))
+        .layer(TraceLayer::new_for_http())
         .with_state(app_state);
 
     // run it with hyper
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    println!("running on {}", addr.to_string());
+    info!("server running on {}", addr.to_string());
     axum::Server::bind(&addr)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await
