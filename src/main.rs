@@ -1,6 +1,7 @@
 extern crate dotenv;
 use std::{net::SocketAddr, sync::Arc};
 
+use auth::http;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -8,7 +9,7 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     Router,
 };
 //allows to extract the IP of connecting user
@@ -18,9 +19,11 @@ use futures::{SinkExt, StreamExt};
 use prisma::PrismaClient;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 
+mod auth;
+mod errors;
 mod prisma;
 
-struct AppState {
+pub struct AppState {
     tx: Sender<WSData>,
     rx: Receiver<WSData>,
 }
@@ -42,10 +45,12 @@ async fn main() {
         .route("/", get(index))
         .route("/:key", get(key_handler))
         .route("/ws", get(ws_handler))
+        .route("/auth/login", post(http::login))
         .with_state(app_state);
 
     // run it with hyper
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    println!("running on {}", addr.to_string());
     axum::Server::bind(&addr)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await
