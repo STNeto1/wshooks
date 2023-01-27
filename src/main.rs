@@ -5,13 +5,13 @@ use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{
-        Path,
-        State, ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, State,
     },
     http::StatusCode,
     response::IntoResponse,
-    Router,
     routing::{get, post},
+    Router,
 };
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
@@ -19,15 +19,15 @@ use dotenv::dotenv;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tower_http::trace::TraceLayer;
-use tracing::{info};
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use auth::http;
 use prisma::PrismaClient;
 
 mod auth;
 mod errors;
 mod prisma;
+mod resource;
 
 pub struct AppState {
     tx: Sender<WSData>,
@@ -60,9 +60,10 @@ async fn main() {
         .route("/", get(index))
         .route("/:key", get(key_handler))
         .route("/ws", get(ws_handler))
-        .route("/auth/login", post(http::login))
-        .route("/auth/register", post(http::register))
-        .route("/auth/profile", get(http::profile))
+        .route("/auth/login", post(auth::http::login))
+        .route("/auth/register", post(auth::http::register))
+        .route("/auth/profile", get(auth::http::profile))
+        .route("/resource/create", post(resource::http::create_resource))
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
 

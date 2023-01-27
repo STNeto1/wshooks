@@ -24,7 +24,7 @@ pub mod claims {
     use axum::{
         async_trait, extract::FromRequestParts, http::request::Parts, RequestPartsExt, TypedHeader,
     };
-    use headers::{Authorization, authorization::Bearer};
+    use headers::{authorization::Bearer, Authorization};
     use jsonwebtoken::{decode, Validation};
     use serde::{Deserialize, Serialize};
 
@@ -41,8 +41,8 @@ pub mod claims {
     // handle the injection into the handler
     #[async_trait]
     impl<S> FromRequestParts<S> for Claims
-        where
-            S: Send + Sync,
+    where
+        S: Send + Sync,
     {
         type Rejection = CoreError;
 
@@ -75,7 +75,11 @@ pub mod http {
     use uuid::Uuid;
     use validator::Validate;
 
-    use crate::{AppState, errors::CoreError, prisma::user};
+    use crate::{
+        errors::CoreError,
+        prisma::user::{self, Data},
+        AppState,
+    };
 
     use super::{claims::Claims, KEYS};
 
@@ -119,14 +123,20 @@ pub mod http {
             .await
             .map_err(|_| CoreError::InternalServerError(None))?;
         if user_opt.is_none() {
-            return Err(CoreError::BadRequest(Some("Invalid credentials".to_owned())));
+            return Err(CoreError::BadRequest(Some(
+                "Invalid credentials".to_owned(),
+            )));
         }
 
         let usr = user_opt.unwrap();
 
         match argon2::verify_encoded(usr.password.as_str(), payload.password.as_bytes()) {
             Ok(_) => (),
-            Err(_) => return Err(CoreError::BadRequest(Some("Invalid credentials".to_owned()))),
+            Err(_) => {
+                return Err(CoreError::BadRequest(Some(
+                    "Invalid credentials".to_owned(),
+                )))
+            }
         };
 
         let claims = Claims {
@@ -167,23 +177,33 @@ pub mod http {
             .await
             .map_err(|_| CoreError::InternalServerError(None))?;
         match existing_user {
-            Some(_) => return Err(CoreError::BadRequest(Some("Email already in use".to_owned()))),
-            None => ()
+            Some(_) => {
+                return Err(CoreError::BadRequest(Some(
+                    "Email already in use".to_owned(),
+                )))
+            }
+            None => (),
         }
 
         let salt = b"some salt";
-        let hash_result = argon2::hash_encoded(payload.password.as_bytes(), salt, &Config::default());
+        let hash_result =
+            argon2::hash_encoded(payload.password.as_bytes(), salt, &Config::default());
         if hash_result.is_err() {
             return Err(CoreError::InternalServerError(None));
         }
 
-        let new_user = state.client.user().create(
-            Uuid::new_v4().to_string(),
-            payload.name,
-            payload.email,
-            hash_result.unwrap(),
-            vec![],
-        ).exec().await;
+        let new_user = state
+            .client
+            .user()
+            .create(
+                Uuid::new_v4().to_string(),
+                payload.name,
+                payload.email,
+                hash_result.unwrap(),
+                vec![],
+            )
+            .exec()
+            .await;
         if new_user.is_err() {
             println!("failed to create user");
             return Err(CoreError::InternalServerError(None));
@@ -214,6 +234,19 @@ pub mod http {
         State(state): State<Arc<AppState>>,
         claims: Claims,
     ) -> Result<Json<Profile>, CoreError> {
+        let user = profile_from_claims(&state, claims).await?;
+
+        return Ok(Json(Profile {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+        }));
+    }
+
+    pub async fn profile_from_claims(
+        state: &Arc<AppState>,
+        claims: Claims,
+    ) -> Result<Data, CoreError> {
         let subject = state
             .client
             .user()
@@ -225,12 +258,6 @@ pub mod http {
             return Err(CoreError::Unauthorized(None));
         }
 
-        let unwrapped_user = subject.unwrap();
-
-        return Ok(Json(Profile {
-            id: unwrapped_user.id,
-            name: unwrapped_user.name,
-            email: unwrapped_user.email,
-        }));
+        return Ok(subject.unwrap());
     }
 }
