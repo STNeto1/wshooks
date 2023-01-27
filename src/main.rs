@@ -5,13 +5,13 @@ use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{
-        Path,
-        State, ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, State,
     },
     http::StatusCode,
     response::IntoResponse,
-    Router,
     routing::{get, post},
+    Router,
 };
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
@@ -64,6 +64,11 @@ async fn main() {
         .route("/auth/register", post(auth::http::register))
         .route("/auth/profile", get(auth::http::profile))
         .route("/resource/create", post(resource::http::create_resource))
+        .route("/resource/list", get(resource::http::list_user_resources))
+        .route(
+            "/resource/show/:id",
+            get(resource::http::show_user_resource),
+        )
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
 

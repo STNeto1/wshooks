@@ -1,20 +1,20 @@
-
 use std::sync::Arc;
 
+use axum::extract::Path;
 use axum::{extract::State, Json};
 use nanoid::nanoid;
 use serde::Deserialize;
 use validator::Validate;
 
+use crate::auth::{claims::Claims, http::profile_from_claims};
 use crate::{
-    AppState,
     errors::CoreError,
     prisma::{
         resource::{self, Data},
         user,
     },
+    AppState,
 };
-use crate::auth::{claims::Claims, http::profile_from_claims};
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct CreateResourcePayload {
@@ -67,4 +67,49 @@ pub async fn create_resource(
         .map_err(|_| CoreError::InternalServerError(None))?;
 
     return Ok(Json(new_resource));
+}
+
+pub async fn list_user_resources(
+    State(state): State<Arc<AppState>>,
+    claims: Claims,
+) -> Result<Json<Vec<Data>>, CoreError> {
+    let user = profile_from_claims(&state, claims).await?;
+
+    let resources = state
+        .client
+        .resource()
+        .find_many(vec![resource::user::is(vec![user::id::equals(
+            user.id.to_owned(),
+        )])])
+        .exec()
+        .await
+        .map_err(|_| CoreError::InternalServerError(None))?;
+
+    return Ok(Json(resources));
+}
+
+pub async fn show_user_resource(
+    State(state): State<Arc<AppState>>,
+    claims: Claims,
+    Path(id): Path<String>,
+) -> Result<Json<Data>, CoreError> {
+    let user = profile_from_claims(&state, claims).await?;
+
+    let resource = state
+        .client
+        .resource()
+        .find_first(vec![
+            resource::id::equals(id),
+            resource::user::is(vec![user::id::equals(user.id.to_owned())]),
+        ])
+        .exec()
+        .await
+        .map_err(|_| CoreError::InternalServerError(None))?;
+    if resource.is_none() {
+        return Err(CoreError::NotFound(Some(
+            "Resource was not found".to_owned(),
+        )));
+    }
+
+    return Ok(Json(resource.unwrap()));
 }
