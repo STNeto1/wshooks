@@ -10,6 +10,7 @@ use validator::{ValidationErrors, ValidationErrorsKind};
 pub enum CoreError {
     BadRequest(Option<String>),
     BadValidation(ValidationErrors),
+    Unauthorized(Option<String>),
 }
 
 #[derive(Serialize)]
@@ -31,19 +32,16 @@ impl IntoResponse for CoreError {
                 String::from("Bad Request"),
                 Some(parse_error_messages(err)),
             ),
+            CoreError::Unauthorized(message) => (
+                StatusCode::UNAUTHORIZED,
+                message.unwrap_or(String::from("Unauthorized")),
+                None,
+            ),
         };
-
-        if messages.is_some() {
-            let body = Json(json!({
-                "error": error_message,
-                "messages": messages
-            }));
-
-            return (status, body).into_response();
-        }
 
         let body = Json(json!({
             "error": error_message,
+            "messages": messages.unwrap_or(vec![])
         }));
 
         return (status, body).into_response();

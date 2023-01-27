@@ -46,6 +46,7 @@ async fn main() {
         .route("/:key", get(key_handler))
         .route("/ws", get(ws_handler))
         .route("/auth/login", post(http::login))
+        .route("/auth/profile", get(http::profile))
         .with_state(app_state);
 
     // run it with hyper
