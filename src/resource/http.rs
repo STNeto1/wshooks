@@ -113,3 +113,37 @@ pub async fn show_user_resource(
 
     return Ok(Json(resource.unwrap()));
 }
+
+pub async fn delete_user_resource(
+    State(state): State<Arc<AppState>>,
+    claims: Claims,
+    Path(id): Path<String>,
+) -> Result<(), CoreError> {
+    let user = profile_from_claims(&state, claims).await?;
+
+    let resource = state
+        .client
+        .resource()
+        .find_first(vec![
+            resource::id::equals(id),
+            resource::user::is(vec![user::id::equals(user.id.to_owned())]),
+        ])
+        .exec()
+        .await
+        .map_err(|_| CoreError::InternalServerError(None))?;
+    if resource.is_none() {
+        return Err(CoreError::NotFound(Some(
+            "Resource was not found".to_owned(),
+        )));
+    }
+
+    state
+        .client
+        .resource()
+        .delete(resource::id::equals(resource.unwrap().id))
+        .exec()
+        .await
+        .map_err(|_| CoreError::InternalServerError(Some("Error deleting resource".to_owned())))?;
+
+    return Ok(());
+}

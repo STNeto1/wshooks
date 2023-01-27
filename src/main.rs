@@ -10,7 +10,7 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, method_routing::delete, post},
     Router,
 };
 //allows to extract the IP of connecting user
@@ -68,6 +68,10 @@ async fn main() {
         .route(
             "/resource/show/:id",
             get(resource::http::show_user_resource),
+        )
+        .route(
+            "/resource/delete/:id",
+            delete(resource::http::delete_user_resource),
         )
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
