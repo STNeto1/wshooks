@@ -103,7 +103,7 @@ pub mod http {
     }
 
     pub async fn login(
-        State(_state): State<Arc<AppState>>,
+        State(state): State<Arc<AppState>>,
         Json(payload): Json<LoginPayload>,
     ) -> Result<Json<AuthBody>, CoreError> {
         match payload.validate() {
@@ -111,12 +111,26 @@ pub mod http {
             Err(e) => return Err(CoreError::BadValidation(e)),
         }
 
-        if payload.email != "mail@mail.com" || payload.password != "102030" {
-            return Err(CoreError::BadRequest(Some("Bad credentials".to_owned())));
+        let user_opt = state
+            .client
+            .user()
+            .find_first(vec![user::email::equals(payload.email.to_owned())])
+            .exec()
+            .await
+            .map_err(|_| CoreError::InternalServerError(None))?;
+        if user_opt.is_none() {
+            return Err(CoreError::BadRequest(Some("Invalid credentials".to_owned())));
         }
 
+        let usr = user_opt.unwrap();
+
+        match argon2::verify_encoded(usr.password.as_str(), payload.password.as_bytes()) {
+            Ok(_) => (),
+            Err(_) => return Err(CoreError::BadRequest(Some("Invalid credentials".to_owned()))),
+        };
+
         let claims = Claims {
-            sub: "mail@mail.com".to_owned(),
+            sub: usr.id.to_owned(),
             exp: 2000000000, // May 2033
         };
 
