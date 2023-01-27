@@ -7,14 +7,14 @@ pub mod http {
     use validator::Validate;
 
     use crate::{
-        auth::{claims::Claims, http::profile_from_claims},
+        AppState,
         errors::CoreError,
         prisma::{
             resource::{self, Data},
             user,
         },
-        AppState,
     };
+    use crate::auth::{claims::Claims, http::profile_from_claims};
 
     #[derive(Debug, Deserialize, Validate)]
     pub struct CreateResourcePayload {
@@ -48,7 +48,7 @@ pub mod http {
             Some(_) => {
                 return Err(CoreError::BadRequest(Some(
                     "Resource key already exists".to_owned(),
-                )))
+                )));
             }
             None => (),
         }

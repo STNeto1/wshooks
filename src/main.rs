@@ -5,13 +5,13 @@ use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
-        Path, State,
+        Path,
+        State, ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
     Router,
+    routing::{get, post},
 };
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
