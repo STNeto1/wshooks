@@ -22,7 +22,7 @@ use crate::ws::{key_handler, ws_handler, WSData};
 mod auth;
 mod errors;
 mod prisma;
-mod resource;
+mod topic;
 mod ws;
 
 pub struct AppState {
@@ -59,16 +59,10 @@ async fn main() {
         .route("/auth/login", post(auth::http::login))
         .route("/auth/register", post(auth::http::register))
         .route("/auth/profile", get(auth::http::profile))
-        .route("/resource/create", post(resource::http::create_resource))
-        .route("/resource/list", get(resource::http::list_user_resources))
-        .route(
-            "/resource/show/:id",
-            get(resource::http::show_user_resource),
-        )
-        .route(
-            "/resource/delete/:id",
-            delete(resource::http::delete_user_resource),
-        )
+        .route("/topic/create", post(topic::http::create_topic))
+        .route("/topic/list", get(topic::http::list_user_topics))
+        .route("/topic/show/:id", get(topic::http::show_user_topic))
+        .route("/topic/delete/:id", delete(topic::http::delete_user_topic))
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
 

@@ -10,23 +10,23 @@ use crate::auth::{claims::Claims, http::profile_from_claims};
 use crate::{
     errors::CoreError,
     prisma::{
-        resource::{self, Data},
+        topic::{self, Data},
         user,
     },
     AppState,
 };
 
 #[derive(Debug, Deserialize, Validate)]
-pub struct CreateResourcePayload {
+pub struct CreateTopicPayload {
     #[validate(length(min = 4))]
     name: String,
     key: Option<String>,
 }
 
-pub async fn create_resource(
+pub async fn create_topic(
     State(state): State<Arc<AppState>>,
     claims: Claims,
-    Json(payload): Json<CreateResourcePayload>,
+    Json(payload): Json<CreateTopicPayload>,
 ) -> Result<Json<Data>, CoreError> {
     match payload.validate() {
         Ok(_) => (),
@@ -37,25 +37,25 @@ pub async fn create_resource(
 
     let key = payload.key.unwrap_or(nanoid!());
 
-    let existing_resource = state
+    let existing_topic = state
         .client
-        .resource()
-        .find_unique(resource::key::equals(key.to_owned()))
+        .topic()
+        .find_unique(topic::key::equals(key.to_owned()))
         .exec()
         .await
         .map_err(|_| CoreError::InternalServerError(None))?;
-    match existing_resource {
+    match existing_topic {
         Some(_) => {
             return Err(CoreError::BadRequest(Some(
-                "Resource key already exists".to_owned(),
+                "Topic key already exists".to_owned(),
             )));
         }
         None => (),
     }
 
-    let new_resource = state
+    let new_topic = state
         .client
-        .resource()
+        .topic()
         .create(
             payload.name,
             key.to_owned(),
@@ -66,84 +66,80 @@ pub async fn create_resource(
         .await
         .map_err(|_| CoreError::InternalServerError(None))?;
 
-    return Ok(Json(new_resource));
+    return Ok(Json(new_topic));
 }
 
-pub async fn list_user_resources(
+pub async fn list_user_topics(
     State(state): State<Arc<AppState>>,
     claims: Claims,
 ) -> Result<Json<Vec<Data>>, CoreError> {
     let user = profile_from_claims(&state, claims).await?;
 
-    let resources = state
+    let topics = state
         .client
-        .resource()
-        .find_many(vec![resource::user::is(vec![user::id::equals(
+        .topic()
+        .find_many(vec![topic::user::is(vec![user::id::equals(
             user.id.to_owned(),
         )])])
         .exec()
         .await
         .map_err(|_| CoreError::InternalServerError(None))?;
 
-    return Ok(Json(resources));
+    return Ok(Json(topics));
 }
 
-pub async fn show_user_resource(
+pub async fn show_user_topic(
     State(state): State<Arc<AppState>>,
     claims: Claims,
     Path(id): Path<String>,
 ) -> Result<Json<Data>, CoreError> {
     let user = profile_from_claims(&state, claims).await?;
 
-    let resource = state
+    let topic = state
         .client
-        .resource()
+        .topic()
         .find_first(vec![
-            resource::id::equals(id),
-            resource::user::is(vec![user::id::equals(user.id.to_owned())]),
+            topic::id::equals(id),
+            topic::user::is(vec![user::id::equals(user.id.to_owned())]),
         ])
         .exec()
         .await
         .map_err(|_| CoreError::InternalServerError(None))?;
-    if resource.is_none() {
-        return Err(CoreError::NotFound(Some(
-            "Resource was not found".to_owned(),
-        )));
+    if topic.is_none() {
+        return Err(CoreError::NotFound(Some("Topic was not found".to_owned())));
     }
 
-    return Ok(Json(resource.unwrap()));
+    return Ok(Json(topic.unwrap()));
 }
 
-pub async fn delete_user_resource(
+pub async fn delete_user_topic(
     State(state): State<Arc<AppState>>,
     claims: Claims,
     Path(id): Path<String>,
 ) -> Result<(), CoreError> {
     let user = profile_from_claims(&state, claims).await?;
 
-    let resource = state
+    let topic = state
         .client
-        .resource()
+        .topic()
         .find_first(vec![
-            resource::id::equals(id),
-            resource::user::is(vec![user::id::equals(user.id.to_owned())]),
+            topic::id::equals(id),
+            topic::user::is(vec![user::id::equals(user.id.to_owned())]),
         ])
         .exec()
         .await
         .map_err(|_| CoreError::InternalServerError(None))?;
-    if resource.is_none() {
-        return Err(CoreError::NotFound(Some(
-            "Resource was not found".to_owned(),
-        )));
+    if topic.is_none() {
+        return Err(CoreError::NotFound(Some("Topic was not found".to_owned())));
     }
 
     state
         .client
-        .resource()
-        .delete(resource::id::equals(resource.unwrap().id))
+        .topic()
+        .delete(topic::id::equals(topic.unwrap().id))
         .exec()
         .await
-        .map_err(|_| CoreError::InternalServerError(Some("Error deleting resource".to_owned())))?;
+        .map_err(|_| CoreError::InternalServerError(Some("Error deleting topic".to_owned())))?;
 
     return Ok(());
 }
