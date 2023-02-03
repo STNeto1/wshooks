@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{
@@ -12,16 +12,20 @@ use axum::{
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::Path;
 use futures::{SinkExt, StreamExt};
+use headers::HeaderMap;
+use serde::Serialize;
 
 use crate::AppState;
 
 pub async fn key_handler(
     Path(key): Path<String>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     match state.tx.send(WSData {
         key: key.to_owned(),
         data: String::from("data"),
+        headers: parse_header_map(&headers),
     }) {
         Ok(_) => {
             println!("success sending message");
@@ -102,10 +106,7 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
             }
 
             if sender
-                .send(Message::Text(format!(
-                    "key => {}, value => {}",
-                    msg.key, msg.data
-                )))
+                .send(Message::Text(serde_json::to_string(&msg).unwrap()))
                 .await
                 .is_err()
             {
@@ -121,10 +122,11 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
     println!("Websocket context {} destroyed", who);
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct WSData {
     pub key: String,
     pub data: String,
+    pub headers: HashMap<String, String>,
 }
 
 #[derive(PartialEq)]
@@ -178,4 +180,17 @@ fn sanitize_ref(msg: &String) -> String {
     }
 
     return msg_cpy;
+}
+
+fn parse_header_map(map: &HeaderMap) -> HashMap<String, String> {
+    let mut result: HashMap<String, String> = HashMap::with_capacity(map.len());
+    map.keys().into_iter().for_each(|k| {
+        if let Some(value) = map.get(k) {
+            if let Ok(str) = value.to_str() {
+                result.insert(k.to_string(), String::from(str));
+            }
+        }
+    });
+
+    return result;
 }
