@@ -20,7 +20,7 @@ pub async fn key_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     match state.tx.send(WSData {
-        key,
+        key: key.to_owned(),
         data: String::from("data"),
     }) {
         Ok(_) => {
@@ -80,8 +80,9 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
         if let Ok(msg) = msg {
             let client_ref = process_message(msg, who);
             // if is not a string with the client ref, just kill
+            // sanitize string with quotes -> "topic" should be handled as topic
             match client_ref.get_data() {
-                Some(d) => _ref = d,
+                Some(d) => _ref = sanitize_ref(&d),
                 _ => return,
             }
         } else {
@@ -165,4 +166,16 @@ fn process_message(msg: Message, who: SocketAddr) -> MessagePayload {
         Message::Pong(_) => MessagePayload::Ignore,
         Message::Ping(_) => MessagePayload::Ignore,
     };
+}
+
+fn sanitize_ref(msg: &String) -> String {
+    let mut msg_cpy = msg.to_owned();
+    if msg.starts_with("\"") {
+        msg_cpy.remove(0);
+    }
+    if msg.starts_with("\"") {
+        msg_cpy.pop();
+    }
+
+    return msg_cpy;
 }
