@@ -3,7 +3,7 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
     http::StatusCode,
     response::IntoResponse,
@@ -20,12 +20,14 @@ use crate::AppState;
 pub async fn key_handler(
     Path(key): Path<String>,
     headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     match state.tx.send(WSData {
         key: key.to_owned(),
         data: String::from("data"),
         headers: parse_header_map(&headers),
+        query: params,
     }) {
         Ok(_) => {
             println!("success sending message");
@@ -127,6 +129,7 @@ pub struct WSData {
     pub key: String,
     pub data: String,
     pub headers: HashMap<String, String>,
+    pub query: HashMap<String, String>,
 }
 
 #[derive(PartialEq)]
