@@ -1,12 +1,14 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use axum::{
+    body::{Body, Bytes},
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
-    http::StatusCode,
+    http::{Request, StatusCode},
     response::IntoResponse,
+    Json,
 };
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
@@ -14,18 +16,40 @@ use axum::extract::Path;
 use futures::{SinkExt, StreamExt};
 use headers::HeaderMap;
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::AppState;
 
-pub async fn key_handler(
+pub async fn get_key_handler(
     Path(key): Path<String>,
-    headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     match state.tx.send(WSData {
         key: key.to_owned(),
-        data: String::from("data"),
+        body: Value::Null,
+        headers: parse_header_map(&headers),
+        query: params,
+    }) {
+        Ok(_) => {
+            println!("success sending message");
+        }
+        Err(err) => println!("error sending message => {}", err),
+    }
+    return (StatusCode::OK, String::from("key route"));
+}
+
+pub async fn post_key_handler(
+    State(state): State<Arc<AppState>>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    match state.tx.send(WSData {
+        key: key.to_owned(),
+        body: payload,
         headers: parse_header_map(&headers),
         query: params,
     }) {
@@ -127,7 +151,7 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
 #[derive(Clone, Serialize)]
 pub struct WSData {
     pub key: String,
-    pub data: String,
+    pub body: Value,
     pub headers: HashMap<String, String>,
     pub query: HashMap<String, String>,
 }

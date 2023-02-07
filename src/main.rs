@@ -17,7 +17,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use prisma::PrismaClient;
 
-use crate::ws::{key_handler, ws_handler, WSData};
+use crate::ws::{get_key_handler, post_key_handler, ws_handler, WSData};
 
 mod auth;
 mod errors;
@@ -54,7 +54,8 @@ async fn main() {
     // build our application with some routes
     let app = Router::new()
         .route("/", get(index))
-        .route("/:key", get(key_handler))
+        .route("/:key", get(get_key_handler).post(post_key_handler))
+        // .route("/:key")
         .route("/ws", get(ws_handler))
         .route("/auth/login", post(auth::http::login))
         .route("/auth/register", post(auth::http::register))
