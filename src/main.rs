@@ -1,7 +1,7 @@
 extern crate argon2;
 extern crate dotenv;
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, vec};
 
 use axum::{
     http::StatusCode,
@@ -43,11 +43,39 @@ async fn main() {
 
     dotenv().expect("failed to load env");
 
+    let thread_client = PrismaClient::_builder()
+        .build()
+        .await
+        .expect("failed to create prisma");
     let client = PrismaClient::_builder()
         .build()
         .await
         .expect("failed to create prisma");
     let (tx, rx) = broadcast::channel::<WSData>(100);
+
+    let mut thread_rx = tx.subscribe();
+    tokio::spawn(async move {
+        while let Ok(msg) = thread_rx.recv().await {
+            let new_log = thread_client
+                .log()
+                .create(
+                    msg.key,
+                    msg.body,
+                    serde_json::to_value(msg.query).unwrap_or_default(),
+                    serde_json::to_value(msg.headers).unwrap_or_default(),
+                    vec![],
+                )
+                .exec()
+                .await;
+
+            match new_log {
+                Ok(_) => (),
+                Err(e) => println!("error creating log {}", e),
+            }
+        }
+
+        println!("thread handler received err");
+    });
 
     let app_state = Arc::new(AppState { tx, rx, client });
 
@@ -55,15 +83,14 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/:key", get(get_key_handler).post(post_key_handler))
-        // .route("/:key")
         .route("/ws", get(ws_handler))
-        .route("/auth/login", post(auth::http::login))
-        .route("/auth/register", post(auth::http::register))
-        .route("/auth/profile", get(auth::http::profile))
-        .route("/topic/create", post(topic::http::create_topic))
-        .route("/topic/list", get(topic::http::list_user_topics))
-        .route("/topic/show/:id", get(topic::http::show_user_topic))
-        .route("/topic/delete/:id", delete(topic::http::delete_user_topic))
+        // .route("/auth/login", post(auth::http::login))
+        // .route("/auth/register", post(auth::http::register))
+        // .route("/auth/profile", get(auth::http::profile))
+        // .route("/topic/create", post(topic::http::create_topic))
+        // .route("/topic/list", get(topic::http::list_user_topics))
+        // .route("/topic/show/:id", get(topic::http::show_user_topic))
+        // .route("/topic/delete/:id", delete(topic::http::delete_user_topic))
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
 

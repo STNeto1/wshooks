@@ -31,3 +31,11 @@ model Topic {
   userId String
   user   User   @relation(fields: [userId], references: [id])
 }
+
+model Log {
+  id      String @id @default(cuid())
+  topic   String
+  body    Json
+  query   Json
+  headers Json
+}
